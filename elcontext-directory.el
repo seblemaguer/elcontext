@@ -24,36 +24,16 @@
 ;;; Code:
 
 (require 'ht)
-(require 'hydra)
 
-(setq elcontext-directory--current "")
+(defvar elcontext-directory--current ""
+  "The current directory of the context.")
+
 (defun elcontext-directory-valid-context (context)
   "Check if the CONTEXT did already run today."
   (when (or (equal (ht-get context :directory) "")
             (equal (expand-file-name "" (ht-get context :directory))
                    (expand-file-name "" default-directory)))
     t))
-
-(defhydra elcontext-directory-hydra (:hint nil :foreign-keys warn)
-  "
-_s_: Set directory    | %`elcontext-directory--current
-_e_: Edit location |
-
-_c_: Create directory
-_q_: Quit
-"
-  ("s" (setq elcontext-directory--current (read-directory-name "Directory: ")))
-  ("e" (setq elcontext-directory--current (read-directory-name "Directory: " elcontext--context-current)))
-  ("c" (progn
-         (ht-set! elcontext--context-current :directory elcontext-directory--current)
-         (setq elcontext-directory--current "")
-         (elcontext-hydra-create-context/body)) :exit t)
-  ("q" (elcontext-hydra-create-context/body) :exit t))
-
-(defun elcontext-directory-create (context)
-  "Choose a new directory or a edit a existing CONTEXT directory from user input."
-  (setq elcontext-directory--current (ht-get context :directory))
-  (elcontext-directory-hydra/body))
 
 (provide 'elcontext-directory)
 

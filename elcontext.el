@@ -25,48 +25,17 @@
 (require 'hydra)
 (require 'f)
 (require 'uuidgen)
+(require 'elcontext-context)
 (require 'elcontext-time)
 (require 'elcontext-action)
 (require 'elcontext-location)
 (require 'elcontext-directory)
-(when (string-equal system-type "darwin")
-  (require 'osx-location))
 
-(defvar elcontext-contexts (ht))
+(if (string-equal system-type "darwin")
+  (require 'osx-location)
+  (eval-when-compile (defun osx-location-watch ())))
 
-(defface elcontext-success
-  '((((class color)) :inherit 'success))
-  "Green color indicating a context which did run today."
-  :group 'elcontext)
-
-(defvar elcontext-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "c") 'elcontext-new-context)
-    (define-key map (kbd "e") 'elcontext-edit-context)
-    (define-key map (kbd "d") 'elcontext-delete-context)
-    (define-key map (kbd "?") 'elcontext-hydra-help/body)
-    map)
-  "Keymap for `elcontext-mode'.")
-
-
-(define-derived-mode elcontext-mode tabulated-list-mode "Contexts"
-  "Special mode for contexts."
-  (setq mode-name "elcontext")
-  (use-local-map elcontext-mode-map)
-  (setq tabulated-list-format
-        (vconcat (vector '("Name" 15 t))
-                 (when (string-equal system-type "darwin") (vector '("Location" 25 t)))
-                 (vector '("Time" 25 t) '("Directory" 25 t) '("Action" 25 t))))
-  (setq tabulated-list-entries 'elcontext--get-contexts-for-table)
-  (tabulated-list-init-header)
-  (tabulated-list-print))
-
-(defun elcontext ()
-  "Manage contexts in Emacs."
-  (interactive)
-  (get-buffer-create "**Contexts**")
-  (switch-to-buffer "**Contexts**")
-  (elcontext-mode))
+
 
 (defun elcontext--get-contexts-for-table ()
   "Return all context in table format."
@@ -83,14 +52,10 @@
                            (prin1-to-string (ht-get context :action))))))
           elcontext-contexts))
 
-(defun elcontext-add-context (id context)
-  "Store a context with ID and CONTEXT."
-  (ht-set! elcontext-contexts id context))
-
 (defun elcontext-check-contexts ()
   "Execute contexts if they are valid."
   (interactive)
-  (ht-each (lambda (name context)
+  (ht-each (lambda (_ context)
              (if (and
                   (elcontext-action-valid-context context)
                   (elcontext-location-valid-context context)
@@ -98,26 +63,6 @@
                   (elcontext-directory-valid-context context))
                  (elcontext-action-run context)))
            elcontext-contexts))
-
-(setq elcontext--timer nil)
-(define-minor-mode elcontext-global-mode
-  "Toogle elcontext-mode. Checks every minute for valid contexts"
-  :lighter " elc"
-  :group 'elcontext
-  :global t
-  :require 'elcontext
-  (if (symbol-value 'elcontext-global-mode)
-      (progn
-        (setq elcontext--timer (run-at-time nil 5 'elcontext-check-contexts))
-        (when (string-equal system-type "darwin")
-          (osx-location-watch)))
-    (progn
-      (cancel-timer elcontext--timer)
-      (setq elcontext--timer nil))))
-
-(setq elcontext--context-id nil)
-(setq elcontext--context-current
-      (ht (:name nil) (:time (ht)) (:action nil) (:location (ht)) (:directory "")))
 
 (defhydra elcontext-hydra-create-context (:hint nil :foreign-keys warn)
   (concat "_n_: Change name      | Name      %(ht-get elcontext--context-current :name)"
@@ -175,32 +120,148 @@ _q_: Quit
         (elcontext-hydra-create-context/body)
       (wrong-type-argument (user-error "No context found at point")))))
 
-(defun elcontext-delete-context ()
-  "Delete context at point."
+
+
+(defhydra elcontext-time-hydra (:hint nil :foreign-keys warn)
+    "
+_f_: Change from | From %(ht-get elcontext-time--current :from)
+_t_: Change to   | To   %(ht-get elcontext-time--current :to)
+_d_: Add days    | Days %(ht-get elcontext-time--current :days)
+_r_: Remove days
+
+_c_: Create timespan
+_q_: Quit
+"
+    ("f" (let ((from-hour (elcontext-time--pad-time (elcontext-time--read-hour (elcontext-time--get-hour elcontext-time--current :from))))
+               (from-minute (elcontext-time--pad-time (elcontext-time--read-minute (elcontext-time--get-minute elcontext-time--current :from)))))
+           (ht-set! elcontext-time--current :from (concat from-hour ":" from-minute))))
+    ("t" (let ((to-hour (elcontext-time--pad-time (elcontext-time--read-hour (elcontext-time--get-hour elcontext-time--current :to))))
+               (to-minute (elcontext-time--pad-time (elcontext-time--read-minute (elcontext-time--get-minute elcontext-time--current :to)))))
+           (ht-set! elcontext-time--current :to (concat to-hour ":" to-minute))))
+    ("d" (ht-set! elcontext-time--current :days
+                  (-snoc (ht-get elcontext-time--current :days)
+                         (elcontext-time--read-week-days (ht-get elcontext-time--current :days)))))
+    ("r" (ht-set! elcontext-time--current :days
+                  (-remove-item (completing-read "Remove day:" (ht-get elcontext-time--current :days))
+                                (ht-get elcontext-time--current :days))))
+    ("c" (progn
+           (if (or (and (s-present? (ht-get elcontext-time--current :from)) (s-blank? (ht-get elcontext-time--current :to)))
+                   (and (s-present? (ht-get elcontext-time--current :to)) (s-blank? (ht-get elcontext-time--current :from))))
+               (progn
+                 (message "Please specify a from and to time.")
+                 (elcontext-time-hydra/body))
+             (progn
+               (ht-set! elcontext--context-current :time elcontext-time--current)
+               (setq elcontext-time--current (ht))
+               (elcontext-hydra-create-context/body)))) :exit t)
+    ("q" (progn
+           (setq elcontext-time--current (ht))
+           (ht-set! elcontext--context-current :time (ht))
+           (elcontext-hydra-create-context/body)) :exit t))
+
+(defun elcontext-time-create (context)
+  "Create a new timespan or a edit a existing CONTEXT timespan from user input."
+  (setq elcontext-time--current (ht-get context :time))
+  (elcontext-time-hydra/body))
+
+
+
+(defhydra elcontext-directory-hydra (:hint nil :foreign-keys warn)
+  "
+_s_: Set directory    | %`elcontext-directory--current
+_e_: Edit location |
+
+_c_: Create directory
+_q_: Quit
+"
+  ("s" (setq elcontext-directory--current (read-directory-name "Directory: ")))
+  ("e" (setq elcontext-directory--current (read-directory-name "Directory: " elcontext--context-current)))
+  ("c" (progn
+         (ht-set! elcontext--context-current :directory elcontext-directory--current)
+         (setq elcontext-directory--current "")
+         (elcontext-hydra-create-context/body)) :exit t)
+  ("q" (elcontext-hydra-create-context/body) :exit t))
+
+(defun elcontext-directory-create (context)
+  "Choose a new directory or a edit a existing CONTEXT directory from user input."
+  (setq elcontext-directory--current (ht-get context :directory))
+  (elcontext-directory-hydra/body))
+
+
+
+(defhydra elcontext-location-hydra (:hint nil :foreign-keys warn)
+  "
+_l_: Current location | %(elcontext-location-to-string (ht (:location elcontext-location--current)))
+_e_: Edit location    |
+
+_c_: Create location
+_q_: Quit
+"
+  ("l" (setq elcontext-location--current (elcontext-location-get-gps)))
+  ("e" (setq elcontext-location--current (elcontext-location-edit (ht-get elcontext-location--current :lat)
+                                                      (ht-get elcontext-location--current :lon))))
+  ("c" (progn
+         (ht-set! elcontext--context-current :location elcontext-location--current)
+         (setq elcontext-location--current (ht))
+         (elcontext-hydra-create-context/body)) :exit t)
+  ("q" (elcontext-hydra-create-context/body) :exit t))
+
+
+(defun elcontext-location-create (context)
+  "Create a new location or a edit a existing CONTEXT location from user input."
+  (if (string-equal system-type "darwin")
+      (progn
+        (setq elcontext-location--current (ht-get context :location))
+        (elcontext-location-hydra/body))
+    (message "Location Feature works only with macOS")))
+
+
+
+
+
+(define-minor-mode elcontext-global-mode
+  "Toogle elcontext-mode. Checks every minute for valid contexts"
+  :lighter " elc"
+  :group 'elcontext
+  :global t
+  :require 'elcontext
+  (if (symbol-value 'elcontext-global-mode)
+      (progn
+        (setq elcontext--timer (run-at-time nil 5 'elcontext-check-contexts))
+        (when (string-equal system-type "darwin")
+          (osx-location-watch)))
+    (progn
+      (cancel-timer elcontext--timer)
+      (setq elcontext--timer nil))))
+
+(defvar elcontext-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "c") 'elcontext-new-context)
+    (define-key map (kbd "e") 'elcontext-edit-context)
+    (define-key map (kbd "d") 'elcontext-delete-context)
+    (define-key map (kbd "?") 'elcontext-hydra-help/body)
+    map)
+  "Keymap for `elcontext-mode'.")
+
+(define-derived-mode elcontext-mode tabulated-list-mode "Contexts"
+  "Special mode for contexts."
+  (setq mode-name "elcontext")
+  (use-local-map elcontext-mode-map)
+  (setq tabulated-list-format
+        (vconcat (vector '("Name" 15 t))
+                 (when (string-equal system-type "darwin") (vector '("Location" 25 t)))
+                 (vector '("Time" 25 t) '("Directory" 25 t) '("Action" 25 t))))
+  (setq tabulated-list-entries 'elcontext--get-contexts-for-table)
+  (tabulated-list-init-header)
+  (tabulated-list-print))
+
+(defun elcontext ()
+  "Manage contexts in Emacs."
   (interactive)
-  (let ((context (ht-get elcontext-contexts (tabulated-list-get-id))))
-    (condition-case nil
-        (when (y-or-n-p (concat "Delete context " (ht-get context :name) "?"))
-          (ht-remove! elcontext-contexts (tabulated-list-get-id))
-          (tabulated-list-print))
-      (wrong-type-argument (user-error "No context found at point")))))
+  (get-buffer-create "**Contexts**")
+  (switch-to-buffer "**Contexts**")
+  (elcontext-mode))
 
-(defun elcontext--save-contexts ()
-  "Save contexts to disk."
-  (f-write-text (prin1-to-string elcontext-contexts) 'utf-8
-                (expand-file-name ".contexts" user-emacs-directory)))
-
-(add-hook 'kill-emacs-hook 'elcontext--save-contexts)
-
-(defun elcontext--load-contexts ()
-  "Load contexts from disc."
-  (when (f-exists? (expand-file-name ".contexts" user-emacs-directory))
-    (let ((saved-contexts (read (f-read-text (expand-file-name ".contexts" user-emacs-directory)))))
-      (if (ht? saved-contexts)
-          (setq elcontext-contexts saved-contexts)
-        (setq elcontext-contexts (ht))))))
-
-(elcontext--load-contexts)
 
 (provide 'elcontext)
 

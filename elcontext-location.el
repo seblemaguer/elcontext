@@ -24,13 +24,13 @@
 ;;; Code:
 
 (require 'ht)
-(require 'hydra)
 (require 'elcontext-utils)
 (when (string-equal system-type "darwin")
   (require 'osx-location))
 
 
-(setq elcontext-location--current (ht))
+(defvar elcontext-location--current (ht)
+  "The current context location.")
 
 (defun elcontext-location-edit (&optional lat lon)
   "Edit coordinates manually. Initial LAT and LON can be specified."
@@ -69,32 +69,6 @@
 (defun elcontext-location--degree-to-radians (degrees)
   "Convert DEGREES to radians."
   (/ (* degrees pi) 180))
-
-(defhydra elcontext-location-hydra (:hint nil :foreign-keys warn)
-  "
-_l_: Current location | %(elcontext-location-to-string (ht (:location elcontext-location--current)))
-_e_: Edit location    |
-
-_c_: Create location
-_q_: Quit
-"
-  ("l" (setq elcontext-location--current (elcontext-location-get-gps)))
-  ("e" (setq elcontext-location--current (elcontext-location-edit (ht-get elcontext-location--current :lat)
-                                                      (ht-get elcontext-location--current :lon))))
-  ("c" (progn
-         (ht-set! elcontext--context-current :location elcontext-location--current)
-         (setq elcontext-location--current (ht))
-         (elcontext-hydra-create-context/body)) :exit t)
-  ("q" (elcontext-hydra-create-context/body) :exit t))
-
-
-(defun elcontext-location-create (context)
-  "Create a new location or a edit a existing CONTEXT location from user input."
-  (if (string-equal system-type "darwin")
-      (progn
-        (setq elcontext-location--current (ht-get context :location))
-        (elcontext-location-hydra/body))
-    (message "Location Feature works only with macOS")))
 
 (defun elcontext-location-to-string (context)
   "Format a CONTEXT location to a string."

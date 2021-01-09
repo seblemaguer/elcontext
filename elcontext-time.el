@@ -27,8 +27,11 @@
 (require 'ht)
 (require 'dash)
 (require 's)
-(require 'hydra)
 (require 'elcontext-utils)
+
+(defvar elcontext-time--current (ht)
+  "The current time.")
+
 
 (defun elcontext-time--date-to-calendardate (date)
     "Convert time to calendar DATE."
@@ -91,46 +94,6 @@
   "Format the from hourso of a TIMESPAN."
   (ht-get timespan :from))
 
-(setq elcontext-time--current (ht))
-
-(defhydra elcontext-time-hydra (:hint nil :foreign-keys warn)
-    "
-_f_: Change from | From %(ht-get elcontext-time--current :from)
-_t_: Change to   | To   %(ht-get elcontext-time--current :to)
-_d_: Add days    | Days %(ht-get elcontext-time--current :days)
-_r_: Remove days
-
-_c_: Create timespan
-_q_: Quit
-"
-    ("f" (let ((from-hour (elcontext-time--pad-time (elcontext-time--read-hour (elcontext-time--get-hour elcontext-time--current :from))))
-               (from-minute (elcontext-time--pad-time (elcontext-time--read-minute (elcontext-time--get-minute elcontext-time--current :from)))))
-           (ht-set! elcontext-time--current :from (concat from-hour ":" from-minute))))
-    ("t" (let ((to-hour (elcontext-time--pad-time (elcontext-time--read-hour (elcontext-time--get-hour elcontext-time--current :to))))
-               (to-minute (elcontext-time--pad-time (elcontext-time--read-minute (elcontext-time--get-minute elcontext-time--current :to)))))
-           (ht-set! elcontext-time--current :to (concat to-hour ":" to-minute))))
-    ("d" (ht-set! elcontext-time--current :days
-                  (-snoc (ht-get elcontext-time--current :days)
-                         (elcontext-time--read-week-days (ht-get elcontext-time--current :days)))))
-    ("r" (ht-set! elcontext-time--current :days
-                  (-remove-item (completing-read "Remove day:" (ht-get elcontext-time--current :days))
-                                (ht-get elcontext-time--current :days))))
-    ("c" (progn
-           (if (or (and (s-present? (ht-get elcontext-time--current :from)) (s-blank? (ht-get elcontext-time--current :to)))
-                   (and (s-present? (ht-get elcontext-time--current :to)) (s-blank? (ht-get elcontext-time--current :from))))
-               (progn
-                 (message "Please specify a from and to time.")
-                 (elcontext-time-hydra/body))
-             (progn
-               (ht-set! elcontext--context-current :time elcontext-time--current)
-               (setq elcontext-time--current (ht))
-               (elcontext-hydra-create-context/body)))) :exit t)
-    ("q" (progn
-           (setq elcontext-time--current (ht))
-           (ht-set! elcontext--context-current :time (ht))
-           (elcontext-hydra-create-context/body)) :exit t))
-
-
 (defun elcontext-time--read-week-days (selected-days)
   "Read week days from user input ignoring SELECTED-DAYS."
   (completing-read "Week day: "
@@ -144,11 +107,6 @@ _q_: Quit
 (defun elcontext-time--read-minute (&optional minute)
   "Read an minute form user input. Can define default MINUTE."
   (elcontext-utils-read-number-range 0 59 "Minute: " minute))
-
-(defun elcontext-time-create (context)
-  "Create a new timespan or a edit a existing CONTEXT timespan from user input."
-  (setq elcontext-time--current (ht-get context :time))
-  (elcontext-time-hydra/body))
 
 (defun elcontext-time-to-string (context)
   "Format a CONTEXT time to a string."

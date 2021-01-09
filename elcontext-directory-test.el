@@ -2,6 +2,7 @@
 ;;; Commentary:
 ;;; Code:
 (require 'ht)
+(require 'elcontext-directory)
 
 (ert-deftest elcontext-directory-valid-context ()
   "Test if directory context is valid"
